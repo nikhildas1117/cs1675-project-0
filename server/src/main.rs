@@ -1,40 +1,114 @@
-use std::net::{TcpListener};
+use std::fs::{OpenOptions, File};
+use std::io::Write;
+use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use clap::Parser;
+use woonsocket_work::args::WoonsocketServerOpt;
 
 use common::{
     deserialize,
     recv_message,
-    serialize,
     send_message,
+    serialize,
     Request,
     Response,
 };
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:8080")
-        .expect("Failed to bind to address");
+    let opt = WoonsocketServerOpt::parse();
 
-    println!("Server listening on 127.0.0.1:8080");
+    let port = opt.port;
+    let runtime = opt.runtime_secs;
+    let outpath = opt.outpath;
 
-    let (mut stream, addr) = listener.accept().expect("failed to accept connection");
+    let listener = TcpListener::bind(
+        format!("127.0.0.1:{}", port)
+    ).expect("Failed to bind to address");
 
-    println!("Client connected: {addr}");
+    listener.set_nonblocking(true).expect("failed to set nonblocking");
+    println!("Server listening");
 
-    // Receive request
-    let bytes = recv_message(&mut stream).expect("failed to read");
+    // Logs
+    let output_path = outpath.join("server.log");
+    let file = OpenOptions::new().create(true).append(true).open(&output_path).expect("failed to open");
+    let file = Arc::new(Mutex::new(file));
 
-    let request: Request = deserialize(&bytes).expect("failed to deserialize");
+    let start = Instant::now();
 
-    println!("Received Work: {:?}", request.work);
+    while start.elapsed() < Duration::from_secs(runtime) {
+        match listener.accept() {
+            Ok((stream, addr)) => {
+                let file = Arc::clone(&file);
+                println!("Client connected: {addr}");
 
-    let work_result = request.work.perform();
+                stream.set_nonblocking(false).expect("failed to set stream nonblocking");
 
-    println!("Work Performed");
+                thread::spawn(move || {
+                    handle_connection(stream, file);
+                });
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(e) => {
+                eprintln!("failed to accept connection: {e}");
+            }
+        }
+    }
+    println!("Server runtime complete")
+}
 
-    let response = Response {
-        result: work_result,
-    };
 
-    let bytes = serialize(&response).expect("failed to serialize");
+fn handle_connection(mut stream: TcpStream, file: Arc<Mutex<File>>){
+    loop{
+        // Receive request
+        let bytes = match recv_message(&mut stream) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                println!("Client disconnected");
+                break;
+            }
+            Err(e) => {
+                eprintln!("Failed to receive request: {e}");
+                break;
+            }
+        };
 
-    send_message(&mut stream, &bytes).expect("failed to write");
+        let request: Request = match deserialize(&bytes) {
+            Ok(request) => request,
+            Err(e) => {
+                eprintln!("Failed to receive request: {e}");
+                break;
+            }
+        };
+
+        let start = Instant::now();
+
+        let work_result = request.work.perform();
+
+        let server_processing_time = start.elapsed().as_nanos() as u64;
+
+        let response = Response {
+            result: work_result,
+            server_processing_time,
+        };
+
+        let bytes = serialize(&response).expect("failed to serialize");
+
+        send_message(&mut stream, &bytes).expect("send failed");
+
+        {
+            let mut file = file.lock().expect("failed to lock server log");
+
+            writeln!(
+                file,
+                "processing_time_ns={}",
+                server_processing_time,
+            ).expect("failed to write server log");
+        }
+    }
 }

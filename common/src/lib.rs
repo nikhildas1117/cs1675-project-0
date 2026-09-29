@@ -1,8 +1,18 @@
 use std::io::{self, Read, Write};
 use std::net::{TcpStream};
 use woonsocket_work::Work;
-
 use serde::{Deserialize, Serialize};
+
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LatencyRecord {
+    pub latency: u64,
+    pub send_timestamp: u64,
+    pub server_processing_time: u64,
+    pub recv_timestamp: u64,
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Request {
@@ -12,6 +22,7 @@ pub struct Request {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Response {
     pub result: Option<Vec<u8>>,
+    pub server_processing_time: u64,
 }
 
 pub fn serialize<T: Serialize>(
@@ -22,6 +33,7 @@ pub fn serialize<T: Serialize>(
         bincode::config::standard(),
     )
 }
+
 
 pub fn deserialize<T: for <'a> Deserialize<'a>>(
     bytes: &[u8],

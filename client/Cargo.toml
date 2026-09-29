@@ -5,4 +5,10 @@ edition = "2024"
 
 [dependencies]
 common = { path = "../common" }
-woonsocket-work = { git = "https://github.com/cs1675/woonsocket-work" }
+clap = "4"
+woonsocket-work = { 
+    git = "https://github.com/cs1675/woonsocket-work",
+    features = ["argparse"]
+}
+rand = "0.8"
+rand_distr = "0.4"
