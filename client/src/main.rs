@@ -1,9 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::net::{Ipv4Addr, Shutdown, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
+use std::net::{Ipv4Addr, TcpStream};
+use std::sync::mpsc::{channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -24,8 +22,6 @@ use common::{deserialize,
 
 /// Number of persistent connections used by open-loop generator.
 const OPEN_LOOP_CONNECTIONS: usize = 64;
-/// Extra time after the runtime to wait for outstanding responses.
-const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 
 fn main() {
@@ -76,7 +72,7 @@ fn closed_loop(
             // Each thread gets its own records
             let mut records = Vec::new();
             let mut stream = TcpStream::connect((ip, port)).expect("failed to connect");
-            stream.set_nodelay(true).except("set_nodedelay failed");
+            stream.set_nodelay(true).expect("set_nodedelay failed");
         
             //
             while start.elapsed() < deadline {
@@ -85,23 +81,25 @@ fn closed_loop(
                 let bytes = serialize(&request).expect("failed to serialize");
 
                 if send_message(&mut stream, &bytes).is_err() { 
-                    println!("Thread failed to send")
+                    println!("Thread failed to send");
                     break; 
                 }
 
                 // recv_message blocking TODO: double check
                 let bytes = match recv_message(&mut stream) {
                     Ok(b) => b,
-                    Err(_) => 
-                    println!("Thread failed to recv");
-                    break;
+                    Err(_) => {
+                        println!("Thread failed to recv");
+                        break;
+                    }
                 };
                 let recv_timestamp = start.elapsed().as_nanos() as u64;
                 let response: Response = match deserialize(&bytes) {
                     Ok(r) => r,
-                    Err(_) => 
-                    println!("Thread failed to deserialize");
-                    break;
+                    Err(_) => {
+                        println!("Thread failed to deserialize");
+                        break;
+                    }
                 };
 
                 records.push(
@@ -176,7 +174,7 @@ fn open_loop(
             records
         }));
 
-        conns.push((stream, ts_tx)));
+        conns.push((stream, ts_tx));
     }
 
     // Generate Timings
