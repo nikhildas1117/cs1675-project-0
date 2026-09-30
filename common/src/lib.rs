@@ -62,6 +62,7 @@ pub fn recv_message(
 ) -> io::Result<Vec<u8>> {
     let mut length_bytes = [0u8; 4];
 
+    // read_exact is blocking
     stream.read_exact(&mut length_bytes)?;
     let length = u32::from_be_bytes(length_bytes) as usize;
 
